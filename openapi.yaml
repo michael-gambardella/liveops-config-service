@@ -1,0 +1,531 @@
+openapi: 3.0.3
+
+info:
+  title: LiveOps Config Service API
+  description: |
+    Backend service for managing live events, configuration versions, and audit logs
+    for mobile game LiveOps workflows.
+
+    ## Lifecycle
+    1. Create an **Event** (draft)
+    2. Create a **Config** version for that event (draft)
+    3. **Publish** the config — this is the live version
+    4. To update, create a new config version and publish it
+    5. **Rollback** marks the current published config as rolled_back
+
+    ## Actor
+    Pass `x-actor` header to identify who is making the request. Used in audit logs.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+
+tags:
+  - name: Health
+    description: Service health check
+  - name: Events
+    description: Create and manage live events
+  - name: Configs
+    description: Create, publish, and rollback event configuration versions
+  - name: Audit
+    description: Read-only audit log
+
+paths:
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /api/events:
+    get:
+      tags: [Events]
+      summary: List all events
+      parameters:
+        - name: status
+          in: query
+          description: Filter by event status
+          schema:
+            $ref: '#/components/schemas/EventStatus'
+      responses:
+        '200':
+          description: List of events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Event'
+
+    post:
+      tags: [Events]
+      summary: Create a new event
+      parameters:
+        - $ref: '#/components/parameters/ActorHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEventRequest'
+            example:
+              name: Summer Festival
+              description: Double XP weekend for summer
+              start_time: '2024-06-01T00:00:00Z'
+              end_time: '2024-06-03T23:59:59Z'
+      responses:
+        '201':
+          description: Event created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/events/{id}:
+    get:
+      tags: [Events]
+      summary: Get event by ID
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [Events]
+      summary: Update an event
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/ActorHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEventRequest'
+      responses:
+        '200':
+          description: Updated event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [Events]
+      summary: Archive an event (soft delete)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/ActorHeader'
+      responses:
+        '200':
+          description: Archived event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/configs:
+    get:
+      tags: [Configs]
+      summary: List config versions for an event
+      parameters:
+        - name: event_id
+          in: query
+          required: true
+          description: Filter configs by event
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Config versions ordered by version descending
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Config'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+    post:
+      tags: [Configs]
+      summary: Create a new config version (draft)
+      description: |
+        Version is auto-incremented per event. New configs always start as `draft`.
+      parameters:
+        - $ref: '#/components/parameters/ActorHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConfigRequest'
+            example:
+              event_id: 550e8400-e29b-41d4-a716-446655440000
+              payload:
+                rewardType: gem
+                rewardAmount: 100
+                durationHours: 48
+      responses:
+        '201':
+          description: Config created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/configs/{id}:
+    get:
+      tags: [Configs]
+      summary: Get config by ID
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/configs/{id}/publish:
+    post:
+      tags: [Configs]
+      summary: Publish a draft config
+      description: |
+        Transitions a `draft` config to `published`. Only one config per event
+        should be published at a time — publishing a new version does not
+        automatically roll back the previous one (do that explicitly).
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishConfigRequest'
+      responses:
+        '200':
+          description: Published config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Config is not in draft status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/configs/{id}/rollback:
+    post:
+      tags: [Configs]
+      summary: Roll back a published config
+      description: |
+        Transitions a `published` config to `rolled_back`. This is a safety
+        mechanism to mark the config as inactive. Create and publish a new
+        config version to restore service.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/ActorHeader'
+      responses:
+        '200':
+          description: Rolled back config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Config is not in published status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/audit:
+    get:
+      tags: [Audit]
+      summary: Get audit log entries
+      parameters:
+        - name: entity_type
+          in: query
+          schema:
+            $ref: '#/components/schemas/AuditEntityType'
+        - name: entity_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: Audit log entries ordered by created_at descending
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditEntry'
+
+components:
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    ActorHeader:
+      name: x-actor
+      in: header
+      description: Identifier (username or system name) of who is making the request
+      schema:
+        type: string
+      example: alice
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Event not found
+
+    ValidationError:
+      description: Request body failed validation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorResponse'
+
+  schemas:
+
+    EventStatus:
+      type: string
+      enum: [draft, active, archived]
+
+    ConfigStatus:
+      type: string
+      enum: [draft, published, rolled_back]
+
+    AuditEntityType:
+      type: string
+      enum: [event, config]
+
+    AuditAction:
+      type: string
+      enum: [created, updated, published, rolled_back, archived]
+
+    Event:
+      type: object
+      required: [id, name, status, start_time, end_time, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/EventStatus'
+        start_time:
+          type: string
+          format: date-time
+        end_time:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Config:
+      type: object
+      required: [id, event_id, version, payload, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        event_id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          description: Auto-incremented per event, starting at 1
+        payload:
+          type: object
+          additionalProperties: true
+          description: Free-form JSON config data
+        status:
+          $ref: '#/components/schemas/ConfigStatus'
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        published_by:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AuditEntry:
+      type: object
+      required: [id, entity_type, entity_id, action, actor, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        entity_type:
+          $ref: '#/components/schemas/AuditEntityType'
+        entity_id:
+          type: string
+          format: uuid
+        action:
+          $ref: '#/components/schemas/AuditAction'
+        actor:
+          type: string
+        metadata:
+          type: object
+          nullable: true
+          description: Before/after state or other contextual data
+        created_at:
+          type: string
+          format: date-time
+
+    CreateEventRequest:
+      type: object
+      required: [name, start_time, end_time]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+        start_time:
+          type: string
+          format: date-time
+        end_time:
+          type: string
+          format: date-time
+          description: Must be after start_time
+
+    UpdateEventRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+        status:
+          $ref: '#/components/schemas/EventStatus'
+        start_time:
+          type: string
+          format: date-time
+        end_time:
+          type: string
+          format: date-time
+
+    CreateConfigRequest:
+      type: object
+      required: [event_id, payload]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        payload:
+          type: object
+          additionalProperties: true
+
+    PublishConfigRequest:
+      type: object
+      required: [published_by]
+      properties:
+        published_by:
+          type: string
+          minLength: 1
+          maxLength: 255
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    ValidationErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        details:
+          type: array
+          items:
+            type: object
