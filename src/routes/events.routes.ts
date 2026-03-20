@@ -9,7 +9,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const status = req.query.status as string | undefined;
     const events = await eventsService.listEvents(status);
-    res.json(events);
+    res.json({ data: events });
   } catch (err) {
     next(err);
   }

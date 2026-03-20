@@ -9,6 +9,7 @@ dist/
 
 # Logs
 *.log
+npm-debug.log*
 
 # OS
 .DS_Store
@@ -17,6 +18,11 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+*.suo
+*.user
 
 # Test coverage
 coverage/
+
+# TypeScript cache
+*.tsbuildinfo

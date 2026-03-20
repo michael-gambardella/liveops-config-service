@@ -13,7 +13,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       return;
     }
     const configs = await configsService.listConfigs(event_id);
-    res.json(configs);
+    res.json({ data: configs });
   } catch (err) {
     next(err);
   }
